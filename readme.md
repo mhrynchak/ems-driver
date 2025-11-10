@@ -1,3 +1,3 @@
 compile:
 
-g++ Main.cpp -o modbus_scanner -lmodbus
+g++ *.cpp -o ems-mvp -lmodbus -lsqlite3
