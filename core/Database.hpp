@@ -6,6 +6,7 @@
 #include <chrono>
 
 struct sqlite3;
+class DataPoint; // Forward declaration
 
 class Database {
 public:
@@ -20,6 +21,8 @@ public:
     Database(Database&&) noexcept;
     Database& operator=(Database&&) noexcept;
 
+    // Insert operations
+    bool insertDataPoint(uint16_t slaveId, const DataPoint& dataPoint);
 
 private:
 
