@@ -45,7 +45,7 @@ void ModbusScanner::printDevicesData() {
     cout << string(80, '=') << endl;
 
     for (const auto& [id, inv] : devices) {
-        cout << "\nInverter: " << inv.device_name << " (Slave ID: " << id << ")" << endl;
+        cout << "\nInverter: " << inv.device_name << endl;
         cout << string(50, '-') << endl;
         cout << "DC Side:" << endl;
         cout << "  Voltage: " << setw(5) << inv.dc_voltage << " V" << endl;
@@ -88,32 +88,47 @@ void ModbusScanner::printDevicesData() {
          << "%" << endl;
 }
 
+void ModbusScanner::registerDriver(const std::string& name, std::shared_ptr<IDeviceDriver> driver) {
+    driverRegistry_[name] = std::move(driver);
+    cout << "Registered driver: " << name << endl;
+}
+
 bool ModbusScanner::readInverterData(int id, DataPoint& data) {
     if (!mb) return false;
 
+    auto deviceDriver = deviceDrivers_.find(id);
+    if (deviceDriver != deviceDrivers_.end()) {
+        // Delegate reading to the specific driver assigned to this slave ID
+        return deviceDriver->second->readData(mb, id, data);
+    } else {
+        // Fallback if no specific driver is found (shouldn't happen if scanForSlaves works correctly)
+        cerr << "No specific driver found for slave ID: " << id << ". Using generic approach." << endl;
+        // Attempt to use a generic driver if available in the registry
+        if (driverRegistry_.count("Generic")) {
+            return driverRegistry_["Generic"]->readData(mb, id, data);
+        }
+        cerr << "No generic driver registered. Cannot read data for slave " << id << endl;
+        return false;
+    }
+}
+
+bool ModbusScanner::isSunSpecDevice(int id) {
     modbus_set_slave(mb, id);
-    uint16_t registers[7];
+    uint16_t regs[2]; // Cover 40001 - 40002 registers
 
-    int rc = modbus_read_registers(mb, 0, 7, registers);
-
-    if (rc == -1) {
-        cerr << "Failed to read registers: " << modbus_strerror(errno) << endl;
+    if (modbus_read_registers(mb, 40001, 2, regs) == -1) {
+        std::cerr << "Failed to read registers for slave " << id << ": " << modbus_strerror(errno) << std::endl;
         return false;
     }
 
-    data.slave_id = id;
-    data.is_active = true;
-    data.dc_voltage = registers[0];
-    data.dc_current = registers[1];
-    data.dc_power = registers[2];
-    data.ac_voltage = registers[3];
-    data.ac_current = registers[4];
-    data.ac_power = registers[5];
-    data.error_code = registers[6];
-    data.device_name = "PV Inverter " + to_string(id);
-    data.timestamp = std::chrono::system_clock::now();
-    
-    return true;
+    uint32_t suns = ((uint32_t)regs[0] << 16) | regs[1];
+
+    if (suns == 0x53756e53) {
+        std::cout << "SunSpec device detected!" << std::endl;
+        return true;
+    }
+
+    return false;
 }
 
 vector<int> ModbusScanner::scanForSlaves() {
@@ -129,15 +144,30 @@ vector<int> ModbusScanner::scanForSlaves() {
         modbus_set_slave(mb, id);
 
         uint16_t test_reg;
-        int rc = modbus_read_registers(mb, 0, 1, &test_reg);
+        int rc = modbus_read_registers(mb, 0, 1, &test_reg); // Read holding register 0
 
-        if (rc != -1) {
-            activeSlaves.push_back(id);
-            cout << "Found active device: " << id << endl;
+        if (rc == -1) {
+            continue;
         }
 
-        // Small delay to avoid overwhelming the network
-        // usleep(10000); // 10ms delay
+        activeSlaves.push_back(id);
+        cout << "Found active device: " << id << endl;
+        std::shared_ptr<IDeviceDriver> assignedDriver = nullptr;
+
+        if (isSunSpecDevice(id)) {
+            assignedDriver = driverRegistry_["SunSpec"];
+        }
+
+        if (assignedDriver) {
+            deviceDrivers_[id] = assignedDriver;
+            cout << " (Assigned " << assignedDriver->getDriverName() << " Driver)";
+        } else if (driverRegistry_.count("Generic")) { // Fallback to Generic if no specific driver identified
+            deviceDrivers_[id] = driverRegistry_["Generic"];
+            cout << " (Assigned Generic Driver)";
+        } else {
+            cout << " (No specific or generic driver assigned)";
+        }
+        cout << endl;
         
         // Progress indicator
         if (id % 10 == 0) {

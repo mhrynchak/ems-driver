@@ -2,6 +2,7 @@
 #include <iostream>
 #include <sstream>
 #include <iomanip>
+#include <cmath>
 
 SyncService::SyncService(std::shared_ptr<Context> ctx, const std::string& dashboardUrl)
     : ctx_(std::move(ctx)), dashboardUrl_(dashboardUrl) {
@@ -203,6 +204,10 @@ std::string SyncService::createDevicesJson(const std::map<uint16_t, DataPoint>& 
         auto timeT = std::chrono::system_clock::to_time_t(dataPoint.timestamp);
         std::stringstream timestampStream;
         timestampStream << std::put_time(std::gmtime(&timeT), "%Y-%m-%dT%H:%M:%SZ");
+
+        // TEMPORARY, SHOULD BE FLOAT IN JSON, BUT DASHBOARD CURRENTLY EXPECTS INTEGER - CONVERTING FOR COMPATIBILITY
+        const auto power = static_cast<long long>(std::llround(dataPoint.ac_power));
+        const auto capacity = static_cast<long long>(std::llround(dataPoint.ac_power * 2));
         
         json << "  {\n";
         json << "    \"id\": \"inverter-" << slaveId << "\",\n";
@@ -212,8 +217,8 @@ std::string SyncService::createDevicesJson(const std::map<uint16_t, DataPoint>& 
         json << "    \"model\": \"Modbus Inverter\",\n";
         json << "    \"serialNumber\": \"INV-" << std::setfill('0') << std::setw(3) << slaveId << "-UA\",\n";
         json << "    \"lastUpdate\": \"" << timestampStream.str() << "\",\n";
-        json << "    \"power\": " << dataPoint.ac_power << ",\n";
-        json << "    \"capacity\": " << (dataPoint.ac_power * 2) << "\n"; // Estimate capacity as 2x current power
+        json << "    \"power\": " << power << ",\n";
+        json << "    \"capacity\": " << capacity << "\n"; // Estimate capacity as 2x current power
         json << "  }";
     }
     

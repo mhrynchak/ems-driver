@@ -5,6 +5,9 @@
 
 #include "Context.hpp"
 #include "core/ModbusScanner.hpp"
+#include "core/SunSpecDriver.hpp"
+#include "core/HuaweiDriver.hpp"
+#include "core/GenericDriver.hpp"
 #include "core/SyncService.hpp"
 
 // Global flag for graceful shutdown
@@ -37,7 +40,11 @@ int main(int argc, char* argv[]) {
     string host = "127.0.0.1";
     int port = 502;
     std::cout << "Connecting to Modbus server at " << host << ":" << port << "..." << std::endl;
+
     ModbusScanner scanner(ctx, host, port);
+    scanner.registerDriver("SunSpec", std::make_shared<SunSpecDriver>());
+    scanner.registerDriver("Huawei", std::make_shared<HuaweiDriver>());
+    scanner.registerDriver("Generic", std::make_shared<GenericDriver>());
 
     if (!scanner.Connect()) {
         std::cerr << "Failed to connect to Modbus server. Exiting..." << std::endl;

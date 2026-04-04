@@ -12,12 +12,12 @@ public:
 
     uint16_t slave_id = 0;
     bool is_active = false;
-    uint16_t dc_voltage = 0;
-    uint16_t dc_current = 0;
-    uint16_t dc_power = 0;
-    uint16_t ac_voltage = 0;
-    uint16_t ac_current = 0;
-    uint16_t ac_power = 0;
+    float dc_voltage = 0;
+    float dc_current = 0;
+    float dc_power = 0;
+    float ac_voltage = 0;
+    float ac_current = 0;
+    float ac_power = 0;
     uint16_t error_code = 0;
     string device_name = "";
 

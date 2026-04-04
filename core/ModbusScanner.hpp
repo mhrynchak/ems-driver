@@ -8,6 +8,8 @@
 #include <iomanip>
 #include <memory>
 #include <atomic>
+#include "IDeviceDriver.hpp"
+#include <map>
 
 #include "DataPoint.hpp"
 
@@ -22,14 +24,19 @@ public:
     ~ModbusScanner();
 
     bool Connect();
+    void registerDriver(const std::string& name, std::shared_ptr<IDeviceDriver> driver);
     void printDevicesData();
-    bool readInverterData(int id, DataPoint& data);
+    bool readInverterData(int id, DataPoint& data); // This will now delegate to the specific driver
     vector<int> scanForSlaves();
     void Discover();
     void Run(int interval_seconds = 5);
 
 private:
+    bool isSunSpecDevice(int id);
+
     std::shared_ptr<Context> ctx_;
+    std::map<int, std::shared_ptr<IDeviceDriver>> deviceDrivers_; // Map slave ID to specific driver instance
+    std::map<std::string, std::shared_ptr<IDeviceDriver>> driverRegistry_; // Map driver name to a driver factory/prototype
     string host;
     int port;
     int maxSlavesNum;
