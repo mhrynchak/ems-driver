@@ -39,9 +39,21 @@ public:
 
         data.slave_id = slaveId;
         data.is_active = true;
-        std::string manufacturer = regs_to_str(std::vector<uint16_t>(regs+4, regs+20)); // 40005-40020
-        data.device_name = manufacturer + " SunSpec Device [" + std::to_string(slaveId) + "]";
+        std::string manufacturer = regs_to_str(std::vector<uint16_t>(regs + 4, regs + 20));   // 40005-40020
+        std::string model = regs_to_str(std::vector<uint16_t>(regs + 20, regs + 36));         // 40021-40036
+        std::string serial = regs_to_str(std::vector<uint16_t>(regs + 52, regs + 60));        // 40053-40060
+
+        if (!serial.empty()) {
+            data.device_name = serial;
+        } else if (!model.empty()) {
+            data.device_name = model + " [" + std::to_string(slaveId) + "]";
+        } else if (!manufacturer.empty()) {
+            data.device_name = manufacturer + " SunSpec Device [" + std::to_string(slaveId) + "]";
+        } else {
+            data.device_name = "SunSpec Device [" + std::to_string(slaveId) + "]";
+        }
         data.timestamp = std::chrono::system_clock::now();
+        data.driver_name = getDriverName();
 
         // Parse AC data (referencing mock_inverter_sim_frns.py and SunSpec Model 103)
         // A (Total AC Current) - Modbus addresses 40072, 40073

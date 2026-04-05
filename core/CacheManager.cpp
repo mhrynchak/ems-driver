@@ -1,5 +1,6 @@
 #include "CacheManager.hpp"
 #include <iostream>
+#include <iomanip>
 
 CacheManager::CacheManager(Database& db) : db_(db) {};
 
@@ -18,6 +19,25 @@ void CacheManager::stop() {
     if (!running_) return;
     running_ = false;
     if (flushThread_.joinable()) flushThread_.join();
+}
+
+void CacheManager::recordPowerSample(uint16_t slaveId, float dcPower, float acPower) {
+    std::lock_guard<std::mutex> lock(cacheMutex_);
+    auto it = inverterCache_.find(slaveId);
+    if (it != inverterCache_.end()) {
+        it->second.dcPowerSampleSum += static_cast<double>(dcPower);
+        it->second.acPowerSampleSum += static_cast<double>(acPower);
+        it->second.sampleCount++;
+        // std::cout << "  [CacheManager] Device " << slaveId << " recorded samples: dc="
+        //             << std::fixed << std::setprecision(1) << dcPower << "W, ac="
+        //             << acPower << "W, count="
+        //             << it->second.sampleCount << std::endl;
+    } else {
+        // Device not in cache yet - warn
+        // std::cerr << "[CacheManager] WARNING: Tried to record sample for device " << slaveId 
+        //             << " but it's not in cache yet. Make sure ModbusScanner has discovered it."
+        //             << std::endl;
+    }
 }
 
 void CacheManager::workerLoop(std::chrono::seconds interval) {

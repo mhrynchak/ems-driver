@@ -26,8 +26,9 @@ public:
         data.ac_current = regs[4];
         data.ac_power = regs[5];
         data.error_code = regs[6];
-        data.device_name = "Generic Device " + std::to_string(slaveId);
+        data.device_name = "GENERIC-SIM-" + std::to_string(slaveId);
         data.timestamp = std::chrono::system_clock::now();
+        data.driver_name = getDriverName();
         return true;
     }
 };

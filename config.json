@@ -1,0 +1,28 @@
+{
+  "database": {
+    "path": "database.db"
+  },
+  "plant": {
+    "id": "kyiv-oblast-plant",
+    "name": "Plant \"Kyiv Region\""
+  },
+  "modbus": {
+    "host": "127.0.0.1",
+    "port": 502,
+    "scanIntervalSeconds": 5
+  },
+  "health": {
+    "offlineFailureThreshold": 3,
+    "staleTelemetrySeconds": 60
+  },
+  "analytics": {
+    "importTariffPerKwh": 4.32,
+    "co2KgPerKwh": 0.38
+  },
+  "services": {
+    "cacheFlushIntervalSeconds": 10,
+    "analyticsIntervalSeconds": 30,
+    "syncIntervalSeconds": 10,
+    "dashboardUrl": "http://localhost:3000"
+  }
+}

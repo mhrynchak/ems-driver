@@ -1,18 +1,94 @@
 #include "ModbusScanner.hpp"
 #include "../Context.hpp"
 #include <chrono>
+#include <algorithm>
+#include <cerrno>
+#include <cctype>
+#include <ctime>
 
-ModbusScanner::ModbusScanner(std::shared_ptr<Context> ctx, const string& host, int port, int maxSlavesNum)
-    : ctx_(std::move(ctx)), host(host), port(port), maxSlavesNum(maxSlavesNum), mb(nullptr) {}
+namespace {
 
-ModbusScanner::~ModbusScanner() {
-    if (mb) {
-        modbus_close(mb);
-        modbus_free(mb);
+std::string connectivityLabel(const DataPoint& dataPoint) {
+    if (dataPoint.connectivity_state == ConnectivityState::Offline) {
+        return "Offline";
+    }
+
+    if (dataPoint.connectivity_state == ConnectivityState::Connecting) {
+        return "Connect";
+    }
+
+    if (dataPoint.consecutive_read_failures > 0 || dataPoint.error_code != 0 || !dataPoint.is_active) {
+        return "Warn";
+    }
+
+    return "Online";
+}
+
+bool hasVisibleTelemetry(const DataPoint& dataPoint) {
+    return dataPoint.has_successful_read && dataPoint.connectivity_state != ConnectivityState::Offline;
+}
+
+std::string formatSummaryMetric(const DataPoint& dataPoint, float value) {
+    if (!hasVisibleTelemetry(dataPoint)) {
+        return "N/A";
+    }
+
+    std::ostringstream stream;
+    stream << fixed << setprecision(1) << value;
+    return stream.str();
+}
+
+bool isConnectionError(int errorCode) {
+    switch (errorCode) {
+        case EPIPE:
+        case ECONNRESET:
+        case ECONNABORTED:
+        case ENOTCONN:
+        case ETIMEDOUT:
+        case ECONNREFUSED:
+        case EBADF:
+            return true;
+        default:
+            return false;
     }
 }
 
+}  // namespace
+
+ModbusScanner::ModbusScanner(
+        std::shared_ptr<Context> ctx,
+        const string& host,
+        int port,
+        int maxSlavesNum,
+        const string& endpointName,
+        int cacheKeyOffset,
+        int offlineFailureThreshold)
+        : ctx_(std::move(ctx)),
+            host(host),
+            port(port),
+            maxSlavesNum(maxSlavesNum),
+            mb(nullptr),
+            endpointName_(endpointName),
+            cacheKeyOffset_(cacheKeyOffset),
+            offlineFailureThreshold_(std::max(1, offlineFailureThreshold)) {}
+
+ModbusScanner::~ModbusScanner() {
+    closeConnection();
+}
+
+void ModbusScanner::closeConnection() {
+    if (!mb) {
+        return;
+    }
+
+    modbus_close(mb);
+    modbus_free(mb);
+    mb = nullptr;
+}
+
 bool ModbusScanner::Connect() {
+    closeConnection();
+
     mb = modbus_new_tcp(host.c_str(), port);
     if (mb == nullptr) {
         cerr << "Failed to create Modbus context" << endl;
@@ -24,13 +100,25 @@ bool ModbusScanner::Connect() {
     if (modbus_connect(mb) == -1) {
         cerr << "Failed to connect to " << host << ":" << port 
              << " - " << modbus_strerror(errno) << endl;
-        modbus_free(mb);
-        mb = nullptr;
+        closeConnection();
         return false;
     }
 
     cout << "Connected to Modbus server at " << host << ":" << port << endl;
     return true;
+}
+
+bool ModbusScanner::reconnect(const std::string& reason) {
+    cerr << "Reconnecting Modbus endpoint '" << endpointName_ << "' at "
+         << host << ":" << port << " after " << reason << endl;
+
+    closeConnection();
+    const bool reconnected = Connect();
+    if (reconnected) {
+        firstRun = true;
+    }
+
+    return reconnected;
 }
 
 void ModbusScanner::printDevicesData() {
@@ -40,44 +128,47 @@ void ModbusScanner::printDevicesData() {
         return;
     }
 
-    cout << "\n=== INVERTER DISCOVERY AND DATA COLLECTION ===" << endl;
+    cout << "\n--- INVERTER DISCOVERY AND DATA COLLECTION ---" << endl;
     cout << "Found " << devices.size() << " active inverters:" << endl;
-    cout << string(80, '=') << endl;
+    cout << string(80, '-') << endl;
 
     for (const auto& [id, inv] : devices) {
-        cout << "\nInverter: " << inv.device_name << endl;
-        cout << string(50, '-') << endl;
-        cout << "DC Side:" << endl;
-        cout << "  Voltage: " << setw(5) << inv.dc_voltage << " V" << endl;
-        cout << "  Current: " << setw(5) << inv.dc_current << " A" << endl;
-        cout << "  Power:   " << setw(5) << inv.dc_power << " W" << endl;
-        cout << "AC Side:" << endl;
-        cout << "  Voltage: " << setw(5) << inv.ac_voltage << " V" << endl;
-        cout << "  Current: " << setw(5) << inv.ac_current << " A" << endl;
-        cout << "  Power:   " << setw(5) << inv.ac_power << " W" << endl;
-        cout << "Status:" << endl;
-        cout << "  Error:   " << (inv.error_code ? "ERROR" : "OK") 
-             << " (" << inv.error_code << ")" << endl;
+        if (!inv.source_endpoint.empty() && inv.source_endpoint != endpointName_) {
+            continue;
+        }
+        cout << "Inverter: " << inv.device_name << endl;
     }
 
     // Summary table
-    cout << "\n=== SUMMARY TABLE ===" << endl;
-    cout << "Slave | DC V | DC A | DC W | AC V | AC A | AC W | Status" << endl;
-    cout << "------|------|------|------|------|------|------|--------" << endl;
+    cout << "\n--- SUMMARY TABLE ---" << endl;
+    cout << "Slave | DC V | DC A |  DC W  | AC V | AC A |  AC W  | Status" << endl;
+    cout << "------|------|------|--------|------|------|--------|--------" << endl;
     
     int total_dc_power = 0, total_ac_power = 0;
+    bool printedAny = false;
     for (const auto& [id, inv] : devices) {
+        if (!inv.source_endpoint.empty() && inv.source_endpoint != endpointName_) {
+            continue;
+        }
+        printedAny = true;
         cout << setw(5) << id << " |"
-             << setw(5) << inv.dc_voltage << " |"
-             << setw(5) << inv.dc_current << " |"
-             << setw(5) << inv.dc_power << " |"
-             << setw(5) << inv.ac_voltage << " |"
-             << setw(5) << inv.ac_current << " |"
-             << setw(5) << inv.ac_power << " |"
-             << setw(7) << (inv.error_code ? "ERROR" : "OK") << endl;
+             << setw(6) << formatSummaryMetric(inv, inv.dc_voltage) << " |"
+             << setw(6) << formatSummaryMetric(inv, inv.dc_current) << " |"
+             << setw(8) << formatSummaryMetric(inv, inv.dc_power) << " |"
+             << setw(6) << formatSummaryMetric(inv, inv.ac_voltage) << " |"
+             << setw(6) << formatSummaryMetric(inv, inv.ac_current) << " |"
+             << setw(8) << formatSummaryMetric(inv, inv.ac_power) << " |"
+             << setw(8) << connectivityLabel(inv) << endl;
         
-        total_dc_power += inv.dc_power;
-        total_ac_power += inv.ac_power;
+        if (inv.connectivity_state != ConnectivityState::Offline) {
+            total_dc_power += inv.dc_power;
+            total_ac_power += inv.ac_power;
+        }
+    }
+
+    if (!printedAny) {
+        cout << "No inverter data available for endpoint '" << endpointName_ << "'." << endl;
+        return;
     }
     
     cout << string(60, '-') << endl;
@@ -90,26 +181,84 @@ void ModbusScanner::printDevicesData() {
 
 void ModbusScanner::registerDriver(const std::string& name, std::shared_ptr<IDeviceDriver> driver) {
     driverRegistry_[name] = std::move(driver);
-    cout << "Registered driver: " << name << endl;
+    // cout << "Registered driver: " << name << endl;
 }
 
 bool ModbusScanner::readInverterData(int id, DataPoint& data) {
-    if (!mb) return false;
-
-    auto deviceDriver = deviceDrivers_.find(id);
-    if (deviceDriver != deviceDrivers_.end()) {
-        // Delegate reading to the specific driver assigned to this slave ID
-        return deviceDriver->second->readData(mb, id, data);
-    } else {
-        // Fallback if no specific driver is found (shouldn't happen if scanForSlaves works correctly)
-        cerr << "No specific driver found for slave ID: " << id << ". Using generic approach." << endl;
-        // Attempt to use a generic driver if available in the registry
-        if (driverRegistry_.count("Generic")) {
-            return driverRegistry_["Generic"]->readData(mb, id, data);
-        }
-        cerr << "No generic driver registered. Cannot read data for slave " << id << endl;
+    auto driver = resolveDriver(id);
+    if (!driver) {
         return false;
     }
+
+    if (!mb && !Connect()) {
+        return false;
+    }
+
+    if (driver->readData(mb, id, data)) {
+        return true;
+    }
+
+    const int savedErrno = errno;
+    if (!isConnectionError(savedErrno)) {
+        return false;
+    }
+
+    if (!reconnect("read failure (" + std::string(modbus_strerror(savedErrno)) + ")")) {
+        return false;
+    }
+
+    return driver->readData(mb, id, data);
+}
+
+std::shared_ptr<IDeviceDriver> ModbusScanner::resolveDriver(int id) {
+    auto deviceDriver = deviceDrivers_.find(id);
+    if (deviceDriver != deviceDrivers_.end()) {
+        return deviceDriver->second;
+    }
+
+    cerr << "No specific driver found for slave ID: " << id << ". Using generic approach." << endl;
+    if (driverRegistry_.count("Generic")) {
+        return driverRegistry_["Generic"];
+    }
+
+    cerr << "No generic driver registered. Cannot read data for slave " << id << endl;
+    return nullptr;
+}
+
+bool ModbusScanner::isHuaweiDevice(int id) {
+    modbus_set_slave(mb, id);
+
+    uint16_t modelRegs[15]; // Huawei model string at 30000, length 15 registers
+    if (modbus_read_registers(mb, 30000, 15, modelRegs) == -1) {
+        return false;
+    }
+
+    std::string model;
+    model.reserve(30);
+    for (uint16_t reg : modelRegs) {
+        model.push_back(static_cast<char>((reg >> 8) & 0xFF));
+        model.push_back(static_cast<char>(reg & 0xFF));
+    }
+
+    while (!model.empty() && (model.back() == '\0' || model.back() == ' ')) {
+        model.pop_back();
+    }
+
+    if (model.empty()) {
+        return false;
+    }
+
+    std::string upperModel = model;
+    std::transform(upperModel.begin(), upperModel.end(), upperModel.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+
+    if (upperModel.find("SUN2000") != std::string::npos ||
+        upperModel.find("HUAWEI") != std::string::npos) {
+        std::cout << "Huawei device detected! Model: " << model << std::endl;
+        return true;
+    }
+
+    return false;
 }
 
 bool ModbusScanner::isSunSpecDevice(int id) {
@@ -151,21 +300,23 @@ vector<int> ModbusScanner::scanForSlaves() {
         }
 
         activeSlaves.push_back(id);
-        cout << "Found active device: " << id << endl;
+        cout << "Found active device on endpoint '" << endpointName_ << "': " << id << endl;
         std::shared_ptr<IDeviceDriver> assignedDriver = nullptr;
 
-        if (isSunSpecDevice(id)) {
+        if (isSunSpecDevice(id) && driverRegistry_.count("SunSpec")) {
             assignedDriver = driverRegistry_["SunSpec"];
+        } else if (isHuaweiDevice(id) && driverRegistry_.count("Huawei")) {
+            assignedDriver = driverRegistry_["Huawei"];
         }
 
         if (assignedDriver) {
             deviceDrivers_[id] = assignedDriver;
-            cout << " (Assigned " << assignedDriver->getDriverName() << " Driver)";
+            cout << "(Assigned " << assignedDriver->getDriverName() << " Driver)";
         } else if (driverRegistry_.count("Generic")) { // Fallback to Generic if no specific driver identified
             deviceDrivers_[id] = driverRegistry_["Generic"];
-            cout << " (Assigned Generic Driver)";
+            cout << "(Assigned Generic Driver)";
         } else {
-            cout << " (No specific or generic driver assigned)";
+            cout << "(No specific or generic driver assigned)";
         }
         cout << endl;
         
@@ -175,7 +326,8 @@ vector<int> ModbusScanner::scanForSlaves() {
         }
     }
 
-    cout << endl << "Scan complete. Found " << activeSlaves.size() << " active slaves." << endl;
+    cout << endl << "Scan complete for endpoint '" << endpointName_ << "'. Found "
+         << activeSlaves.size() << " active slaves." << endl;
     return activeSlaves;
 }
 
@@ -185,7 +337,7 @@ void ModbusScanner::Discover() {
     // inverterCache.clear();
 
     if (firstRun) {
-        cout << "\n=== INVERTER SCAN ===" << endl;
+        cout << "\n--- INVERTER SCAN ---" << endl;
         _activeSlaves = scanForSlaves();
         if (_activeSlaves.empty()) {
             cout << "No active slaves found. Trying default slave ID 0..." << endl;
@@ -196,10 +348,23 @@ void ModbusScanner::Discover() {
     firstRun = false;
 
     for (int id : _activeSlaves) {
+        const auto readAttemptTime = std::chrono::system_clock::now();
+        const int cacheKey = cacheKeyOffset_ + id;
         DataPoint newData;
         if (readInverterData(id, newData)) {
+            newData.source_slave_id = static_cast<uint16_t>(id);
+            newData.source_endpoint = endpointName_;
+            newData.slave_id = static_cast<uint16_t>(cacheKey);
+            newData.last_read_attempt = readAttemptTime;
+            newData.has_successful_read = true;
+            newData.consecutive_read_failures = 0;
+            newData.connectivity_state = ConnectivityState::Online;
+            if (!newData.device_name.empty()) {
+                newData.device_name = endpointName_ + " / " + newData.device_name;
+            }
+
             // Check if this is new data or if it has changed
-            auto it = inverterCache.find(id);
+            auto it = inverterCache.find(static_cast<uint16_t>(cacheKey));
             bool isNewData = (it == inverterCache.end());
             bool dataChanged = false;
             
@@ -213,32 +378,93 @@ void ModbusScanner::Discover() {
                     oldData.ac_voltage != newData.ac_voltage ||
                     oldData.ac_current != newData.ac_current ||
                     oldData.ac_power != newData.ac_power ||
+                    oldData.has_meter_telemetry != newData.has_meter_telemetry ||
+                    oldData.meter_active_power != newData.meter_active_power ||
+                    oldData.has_battery_telemetry != newData.has_battery_telemetry ||
+                    oldData.battery_soc != newData.battery_soc ||
+                    oldData.battery_power != newData.battery_power ||
                     oldData.error_code != newData.error_code ||
-                    oldData.is_active != newData.is_active
+                    oldData.is_active != newData.is_active ||
+                    oldData.connectivity_state != newData.connectivity_state ||
+                    oldData.consecutive_read_failures != newData.consecutive_read_failures
                 );
             }
             
             // Only mark as unsynced if data is new or changed
             if (isNewData || dataChanged) {
                 newData.synced = false;  // Needs to be flushed
-                inverterCache[id] = newData;
+
+                // Preserve aggregation state across telemetry refreshes.
+                if (!isNewData) {
+                    newData.dcPowerSampleSum = it->second.dcPowerSampleSum;
+                    newData.acPowerSampleSum = it->second.acPowerSampleSum;
+                    newData.sampleCount = it->second.sampleCount;
+                    newData.dailyYieldKwh = it->second.dailyYieldKwh;
+                    newData.lastHourAvgPower = it->second.lastHourAvgPower;
+                }
+
+                inverterCache[static_cast<uint16_t>(cacheKey)] = newData;
                 cout << "Updated data for slave " << id << (dataChanged ? " (changed)" : " (new)") << endl;
             } else {
                 // Data hasn't changed, preserve sync status and update timestamp
                 newData.synced = it->second.synced;  // Keep existing sync status
-                inverterCache[id] = newData;
+
+                // Preserve aggregation state across telemetry refreshes.
+                newData.dcPowerSampleSum = it->second.dcPowerSampleSum;
+                newData.acPowerSampleSum = it->second.acPowerSampleSum;
+                newData.sampleCount = it->second.sampleCount;
+                newData.dailyYieldKwh = it->second.dailyYieldKwh;
+                newData.lastHourAvgPower = it->second.lastHourAvgPower;
+
+                inverterCache[static_cast<uint16_t>(cacheKey)] = newData;
                 cout << "Data unchanged for slave " << id << endl;
             }
+
+            // Record current sample after cache entry exists/has been refreshed.
+            ctx_->cache->recordPowerSample(
+                static_cast<uint16_t>(cacheKey),
+                newData.dc_power,
+                newData.ac_power);
         } else {
-            cout << "Failed to read data from slave " << id << endl; 
+            auto it = inverterCache.find(static_cast<uint16_t>(cacheKey));
+            DataPoint failedData;
+
+            if (it != inverterCache.end()) {
+                failedData = it->second;
+            } else {
+                failedData.slave_id = static_cast<uint16_t>(cacheKey);
+                failedData.source_slave_id = static_cast<uint16_t>(id);
+                failedData.source_endpoint = endpointName_;
+                failedData.device_name =
+                    endpointName_ + " / Device [" + std::to_string(id) + "]";
+                failedData.is_active = false;
+
+                const auto driverIt = deviceDrivers_.find(id);
+                if (driverIt != deviceDrivers_.end() && driverIt->second) {
+                    failedData.driver_name = driverIt->second->getDriverName();
+                }
+            }
+
+            failedData.last_read_attempt = readAttemptTime;
+            failedData.consecutive_read_failures += 1;
+
+            if (failedData.consecutive_read_failures >= offlineFailureThreshold_) {
+                failedData.connectivity_state = ConnectivityState::Offline;
+            } else if (!failedData.has_successful_read) {
+                failedData.connectivity_state = ConnectivityState::Connecting;
+            }
+
+            failedData.synced = false;
+            inverterCache[static_cast<uint16_t>(cacheKey)] = failedData;
+
+            cout << "Failed to read data from slave " << id
+                 << " (consecutive failures: " << failedData.consecutive_read_failures
+                 << ", state: " << connectivityLabel(failedData) << ")" << endl; 
         }
     }
 }
 
 void ModbusScanner::Run(int interval_seconds) {
-    cout << "\n=== CONTINUOUS MONITORING MODE ===" << endl;
-    cout << "Press Ctrl+C to stop..." << endl;
-    
     // Access the global running flag
     extern std::atomic<bool> running;
     
@@ -246,8 +472,11 @@ void ModbusScanner::Run(int interval_seconds) {
         // // Clear screen
         // int ret = system("clear");
         // (void)ret; // Suppress unused variable warning
-        cout << "=== PV INVERTER MONITORING SYSTEM ===" << endl;
-        cout << "Timestamp: " << time(nullptr) << endl;
+        const auto now = std::chrono::system_clock::now();
+        const std::time_t nowTime = std::chrono::system_clock::to_time_t(now);
+        std::tm localTm {};
+        localtime_r(&nowTime, &localTm);
+        cout << "\nTimestamp: " << std::put_time(&localTm, "%Y-%m-%d %H:%M:%S") << endl;
         
         Discover();
         printDevicesData();

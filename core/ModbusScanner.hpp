@@ -20,7 +20,14 @@ using namespace std;
 
 class ModbusScanner {
 public:
-    ModbusScanner(std::shared_ptr<Context> ctx, const string& host = "127.0.0.1", int port = 502, int maxSlavesNum = 100);
+    ModbusScanner(
+        std::shared_ptr<Context> ctx,
+        const string& host = "127.0.0.1",
+        int port = 502,
+        int maxSlavesNum = 100,
+        const string& endpointName = "default",
+        int cacheKeyOffset = 0,
+        int offlineFailureThreshold = 3);
     ~ModbusScanner();
 
     bool Connect();
@@ -32,7 +39,11 @@ public:
     void Run(int interval_seconds = 5);
 
 private:
+    void closeConnection();
+    bool reconnect(const std::string& reason);
+    std::shared_ptr<IDeviceDriver> resolveDriver(int id);
     bool isSunSpecDevice(int id);
+    bool isHuaweiDevice(int id);
 
     std::shared_ptr<Context> ctx_;
     std::map<int, std::shared_ptr<IDeviceDriver>> deviceDrivers_; // Map slave ID to specific driver instance
@@ -43,4 +54,7 @@ private:
     modbus_t *mb;
     bool firstRun = true;
     vector<int> _activeSlaves;
+    string endpointName_;
+    int cacheKeyOffset_;
+    uint32_t offlineFailureThreshold_;
 };

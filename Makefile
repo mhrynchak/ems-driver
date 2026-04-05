@@ -7,7 +7,7 @@ CXXFLAGS = -std=c++17 -Wall -O2
 LIBS = -lmodbus -lsqlite3 -lcurl -lpthread
 
 # Source files
-SOURCES = Main.cpp core/Database.cpp core/CacheManager.cpp core/SyncService.cpp core/ModbusScanner.cpp
+SOURCES = Main.cpp core/Database.cpp core/CacheManager.cpp core/SyncService.cpp core/AnalyticsService.cpp core/ModbusScanner.cpp
 
 # Default target
 all: $(TARGET)
