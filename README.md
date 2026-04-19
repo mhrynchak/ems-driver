@@ -26,7 +26,7 @@ python3 -m pip install pymodbus
 Run:
 
 ```bash
-cd mock-inverter-sim
+cd ems-inverter-sim
 python3 mock_inverter_sim_unified.py --scenario scenario.example.json
 ```
 
@@ -43,7 +43,7 @@ sudo apt-get install -y build-essential libmodbus-dev libsqlite3-dev libcurl4-op
 ```
 
 ```bash
-cd modbus-cpp-app
+cd ems-driver
 make
 ./ems-mvp
 ```

@@ -7,7 +7,7 @@
     "name": "Plant \"Kyiv Region\""
   },
   "modbus": {
-    "host": "mock-inverter-sim",
+    "host": "ems-inverter-sim",
     "port": 502,
     "scanIntervalSeconds": 5
   },
@@ -23,6 +23,6 @@
     "cacheFlushIntervalSeconds": 10,
     "analyticsIntervalSeconds": 30,
     "syncIntervalSeconds": 10,
-    "dashboardUrl": "http://dashboard-ems:3000"
+    "dashboardUrl": "http://ems-dashboard:3000"
   }
 }
