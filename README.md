@@ -26,7 +26,7 @@ python3 -m pip install pymodbus
 Run:
 
 ```bash
-cd ems-inverter-sim
+cd ems-simulator
 python3 mock_inverter_sim_unified.py --scenario scenario.example.json
 ```
 

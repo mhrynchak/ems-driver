@@ -7,7 +7,7 @@
     "name": "Plant \"Kyiv Region\""
   },
   "modbus": {
-    "host": "ems-inverter-sim",
+    "host": "ems-simulator",
     "port": 502,
     "scanIntervalSeconds": 5
   },
