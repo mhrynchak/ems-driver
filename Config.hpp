@@ -20,9 +20,7 @@ struct RuntimeConfig {
     std::string plantName = "Modbus Plant";
     std::string modbusHost = "127.0.0.1";
     int modbusPort = 502;
-    std::vector<ModbusEndpointConfig> modbusEndpoints = {
-        ModbusEndpointConfig{}
-    };
+    std::vector<ModbusEndpointConfig> modbusEndpoints;
     int scanIntervalSeconds = 5;
     int cacheFlushIntervalSeconds = 10;
     int analyticsIntervalSeconds = 30;

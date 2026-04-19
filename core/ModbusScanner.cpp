@@ -89,7 +89,8 @@ void ModbusScanner::closeConnection() {
 bool ModbusScanner::Connect() {
     closeConnection();
 
-    mb = modbus_new_tcp(host.c_str(), port);
+    const std::string portString = std::to_string(port);
+    mb = modbus_new_tcp_pi(host.c_str(), portString.c_str());
     if (mb == nullptr) {
         cerr << "Failed to create Modbus context" << endl;
         return false;

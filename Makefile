@@ -35,7 +35,7 @@ clean:
 # Install dependencies (Ubuntu/Debian)
 deps:
 	sudo apt-get update
-	sudo apt-get install -y libmodbus-dev libsqlite3-dev libcurl4-openssl-dev
+	sudo apt-get install -y libmodbus-dev libsqlite3-dev libcurl4-openssl-dev nlohmann-json3-dev
 
 # Help
 help:
