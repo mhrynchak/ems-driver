@@ -1,8 +1,10 @@
 #pragma once
 
 #include <chrono>
+#include <algorithm>
 #include <fstream>
 #include <iostream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -12,6 +14,9 @@ struct ModbusEndpointConfig {
     std::string name = "default";
     std::string host = "127.0.0.1";
     int port = 502;
+    int scanStartSlaveId = 1;
+    int scanEndSlaveId = 247;
+    std::vector<int> slaveIds;
 };
 
 struct RuntimeConfig {
@@ -20,6 +25,9 @@ struct RuntimeConfig {
     std::string plantName = "Modbus Plant";
     std::string modbusHost = "127.0.0.1";
     int modbusPort = 502;
+    int modbusScanStartSlaveId = 1;
+    int modbusScanEndSlaveId = 247;
+    std::vector<int> modbusSlaveIds;
     std::vector<ModbusEndpointConfig> modbusEndpoints;
     int scanIntervalSeconds = 5;
     int cacheFlushIntervalSeconds = 10;
@@ -42,6 +50,33 @@ inline RuntimeConfig loadRuntimeConfig(const std::string& configPath) {
 
     try {
         const auto json = nlohmann::json::parse(input);
+        auto parseSlaveIds = [](const nlohmann::json& node) {
+            std::vector<int> slaveIds;
+            std::set<int> seen;
+
+            for (const auto& value : node) {
+                const int slaveId = value.get<int>();
+                if (slaveId < 1 || slaveId > 247) {
+                    throw std::runtime_error("slaveIds values must be in range 1..247");
+                }
+                if (seen.insert(slaveId).second) {
+                    slaveIds.push_back(slaveId);
+                }
+            }
+
+            return slaveIds;
+        };
+        auto parseSlaveScanRange = [](const nlohmann::json& node, int& startId, int& endId) {
+            if (node.contains("start")) {
+                startId = node["start"].get<int>();
+            }
+            if (node.contains("end")) {
+                endId = node["end"].get<int>();
+            }
+            if (startId < 1 || endId > 247 || startId > endId) {
+                throw std::runtime_error("slaveScanRange must stay within 1..247 and have start <= end");
+            }
+        };
 
         if (json.contains("database") && json["database"].is_object()) {
             const auto& database = json["database"];
@@ -71,6 +106,15 @@ inline RuntimeConfig loadRuntimeConfig(const std::string& configPath) {
             if (modbus.contains("scanIntervalSeconds")) {
                 config.scanIntervalSeconds = modbus["scanIntervalSeconds"].get<int>();
             }
+            if (modbus.contains("slaveScanRange") && modbus["slaveScanRange"].is_object()) {
+                parseSlaveScanRange(
+                    modbus["slaveScanRange"],
+                    config.modbusScanStartSlaveId,
+                    config.modbusScanEndSlaveId);
+            }
+            if (modbus.contains("slaveIds") && modbus["slaveIds"].is_array()) {
+                config.modbusSlaveIds = parseSlaveIds(modbus["slaveIds"]);
+            }
 
             if (modbus.contains("endpoints") && modbus["endpoints"].is_array()) {
                 std::vector<ModbusEndpointConfig> endpoints;
@@ -80,6 +124,9 @@ inline RuntimeConfig loadRuntimeConfig(const std::string& configPath) {
                     }
 
                     ModbusEndpointConfig parsed;
+                    parsed.scanStartSlaveId = config.modbusScanStartSlaveId;
+                    parsed.scanEndSlaveId = config.modbusScanEndSlaveId;
+                    parsed.slaveIds = config.modbusSlaveIds;
                     if (endpoint.contains("name")) {
                         parsed.name = endpoint["name"].get<std::string>();
                     }
@@ -88,6 +135,15 @@ inline RuntimeConfig loadRuntimeConfig(const std::string& configPath) {
                     }
                     if (endpoint.contains("port")) {
                         parsed.port = endpoint["port"].get<int>();
+                    }
+                    if (endpoint.contains("slaveScanRange") && endpoint["slaveScanRange"].is_object()) {
+                        parseSlaveScanRange(
+                            endpoint["slaveScanRange"],
+                            parsed.scanStartSlaveId,
+                            parsed.scanEndSlaveId);
+                    }
+                    if (endpoint.contains("slaveIds") && endpoint["slaveIds"].is_array()) {
+                        parsed.slaveIds = parseSlaveIds(endpoint["slaveIds"]);
                     }
                     endpoints.push_back(parsed);
                 }
@@ -100,7 +156,14 @@ inline RuntimeConfig loadRuntimeConfig(const std::string& configPath) {
 
         // Backward compatibility: if no endpoints array is provided, use host/port.
         if (config.modbusEndpoints.empty()) {
-            config.modbusEndpoints.push_back({"default", config.modbusHost, config.modbusPort});
+            ModbusEndpointConfig endpoint;
+            endpoint.name = "default";
+            endpoint.host = config.modbusHost;
+            endpoint.port = config.modbusPort;
+            endpoint.scanStartSlaveId = config.modbusScanStartSlaveId;
+            endpoint.scanEndSlaveId = config.modbusScanEndSlaveId;
+            endpoint.slaveIds = config.modbusSlaveIds;
+            config.modbusEndpoints.push_back(endpoint);
         }
 
         if (json.contains("services") && json["services"].is_object()) {

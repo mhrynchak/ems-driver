@@ -9,7 +9,11 @@
   "modbus": {
     "host": "127.0.0.1",
     "port": 502,
-    "scanIntervalSeconds": 5
+    "scanIntervalSeconds": 5,
+    "slaveScanRange": {
+      "start": 1,
+      "end": 247
+    }
   },
   "health": {
     "offlineFailureThreshold": 3,

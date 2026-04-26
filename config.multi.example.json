@@ -8,16 +8,25 @@
   },
   "modbus": {
     "scanIntervalSeconds": 5,
+    "slaveScanRange": {
+      "start": 1,
+      "end": 247
+    },
     "endpoints": [
       {
         "name": "plant-a",
         "host": "127.0.0.1",
-        "port": 502
+        "port": 502,
+        "slaveIds": [1, 2, 3]
       },
       {
         "name": "plant-b",
         "host": "127.0.0.1",
-        "port": 1502
+        "port": 1502,
+        "slaveScanRange": {
+          "start": 10,
+          "end": 32
+        }
       }
     ]
   },

@@ -50,3 +50,32 @@ make
 
 Use `config.multi.example.json` if you want to test with multiple Modbus TCP endpoints.
 
+Modbus slave discovery defaults to `1..247` for each configured endpoint.
+You can either scan a range:
+
+```json
+"modbus": {
+  "host": "127.0.0.1",
+  "port": 502,
+  "slaveScanRange": {
+    "start": 1,
+    "end": 247
+  }
+}
+```
+
+Or pin specific slave IDs globally or per endpoint:
+
+```json
+"modbus": {
+  "slaveIds": [1, 5, 42],
+  "endpoints": [
+    {
+      "name": "plant-a",
+      "host": "127.0.0.1",
+      "port": 502,
+      "slaveIds": [1, 2, 3]
+    }
+  ]
+}
+```

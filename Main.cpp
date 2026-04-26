@@ -65,7 +65,9 @@ std::vector<std::unique_ptr<ModbusScanner>> initializeScanners(
             ctx,
             endpoint.host,
             endpoint.port,
-            100,
+            endpoint.scanStartSlaveId,
+            endpoint.scanEndSlaveId,
+            endpoint.slaveIds,
             endpoint.name,
             cacheKeyOffset,
             config.offlineFailureThreshold);

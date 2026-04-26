@@ -59,14 +59,18 @@ ModbusScanner::ModbusScanner(
         std::shared_ptr<Context> ctx,
         const string& host,
         int port,
-        int maxSlavesNum,
+        int scanStartSlaveId,
+        int scanEndSlaveId,
+        const vector<int>& slaveIds,
         const string& endpointName,
         int cacheKeyOffset,
         int offlineFailureThreshold)
         : ctx_(std::move(ctx)),
             host(host),
             port(port),
-            maxSlavesNum(maxSlavesNum),
+            scanStartSlaveId_(scanStartSlaveId),
+            scanEndSlaveId_(scanEndSlaveId),
+            slaveIds_(slaveIds),
             mb(nullptr),
             endpointName_(endpointName),
             cacheKeyOffset_(cacheKeyOffset),
@@ -289,8 +293,19 @@ vector<int> ModbusScanner::scanForSlaves() {
     }
 
     cout << "Scanning for active Modbus slaves ... " << endl;
+    vector<int> candidateSlaveIds;
+    if (!slaveIds_.empty()) {
+        candidateSlaveIds = slaveIds_;
+    } else {
+        candidateSlaveIds.reserve(scanEndSlaveId_ - scanStartSlaveId_ + 1);
+        for (int id = scanStartSlaveId_; id <= scanEndSlaveId_; ++id) {
+            candidateSlaveIds.push_back(id);
+        }
+    }
 
-    for (int id = 0; id < maxSlavesNum; ++id) {
+    const int totalCandidates = static_cast<int>(candidateSlaveIds.size());
+    for (int index = 0; index < totalCandidates; ++index) {
+        const int id = candidateSlaveIds[index];
         modbus_set_slave(mb, id);
 
         uint16_t test_reg;
@@ -322,8 +337,8 @@ vector<int> ModbusScanner::scanForSlaves() {
         cout << endl;
         
         // Progress indicator
-        if (id % 10 == 0) {
-            cout << "Scanned " << id << "/" << maxSlavesNum << " slaves\r" << flush;
+        if ((index + 1) % 10 == 0 || index + 1 == totalCandidates) {
+            cout << "Scanned " << (index + 1) << "/" << totalCandidates << " slave candidates\r" << flush;
         }
     }
 

@@ -24,7 +24,9 @@ public:
         std::shared_ptr<Context> ctx,
         const string& host = "127.0.0.1",
         int port = 502,
-        int maxSlavesNum = 100,
+        int scanStartSlaveId = 1,
+        int scanEndSlaveId = 247,
+        const vector<int>& slaveIds = {},
         const string& endpointName = "default",
         int cacheKeyOffset = 0,
         int offlineFailureThreshold = 3);
@@ -50,7 +52,9 @@ private:
     std::map<std::string, std::shared_ptr<IDeviceDriver>> driverRegistry_; // Map driver name to a driver factory/prototype
     string host;
     int port;
-    int maxSlavesNum;
+    int scanStartSlaveId_;
+    int scanEndSlaveId_;
+    vector<int> slaveIds_;
     modbus_t *mb;
     bool firstRun = true;
     vector<int> _activeSlaves;
