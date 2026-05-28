@@ -223,7 +223,6 @@ void ModbusScanner::printDevicesData() {
 
 void ModbusScanner::registerDriver(const std::string& name, std::shared_ptr<IDeviceDriver> driver) {
     driverRegistry_[name] = std::move(driver);
-    // cout << "Registered driver: " << name << endl;
 }
 
 bool ModbusScanner::readInverterData(int id, DataPoint& data) {
@@ -393,8 +392,6 @@ vector<int> ModbusScanner::scanForSlaves() {
 
 void ModbusScanner::Discover() {
     auto& inverterCache = ctx_->cache->getInverterCache();
-    // Don't clear the cache! We need to preserve sync status
-    // inverterCache.clear();
 
     if (firstRun) {
         logInfo("\n--- INVERTER SCAN ---");
@@ -532,13 +529,9 @@ void ModbusScanner::Discover() {
 }
 
 void ModbusScanner::Run(int interval_seconds) {
-    // Access the global running flag
     extern std::atomic<bool> running;
     
     while (running.load()) {
-        // // Clear screen
-        // int ret = system("clear");
-        // (void)ret; // Suppress unused variable warning
         const auto now = std::chrono::system_clock::now();
         const std::time_t nowTime = std::chrono::system_clock::to_time_t(now);
         std::tm localTm {};
@@ -554,7 +547,6 @@ void ModbusScanner::Run(int interval_seconds) {
         logInfo("Next update for endpoint '" + endpointName_ + "' in " +
                 std::to_string(interval_seconds) + " seconds...");
         
-        // Sleep with periodic checks for shutdown
         for (int i = 0; i < interval_seconds && running.load(); ++i) {
             sleep(1);
         }
